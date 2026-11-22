@@ -326,7 +326,7 @@
     ay: [['哎呀', 'āi yā'], ['哎哟', 'āi yō']], ee: [['嗯嗯', 'èn èn']], oo: [['哦哦', 'ò ò']], hh: [['哈哈', 'hā hā'], ['嘿嘿', 'hēi hēi']], ws: [['哇塞', 'wā sāi']]
   };
   // 主语后面的停顿语气词: 我呢，… / 这个嘛，… / 你啊，…
-  var TOPIC_P = { n: ['呢', 'ne'], m: ['嘛', 'ma'], a: ['啊', 'a'], y: ['呀', 'ya'], b: ['吧', 'ba'], o: ['哦', 'o'] };
+  var TOPIC_P = { n: ['呢', 'ne'], m: ['嘛', 'ma'], a: ['啊', 'a'], y: ['呀', 'ya'], b: ['吧', 'ba'] };
   var FILL_MIN = 12;     // 通顺以上的结果不足这么多条 (一页) 才垫字
   /** 去掉句末语气词 (最多两个: 了 / 的 + 另一个) -> [剩下的, 语气词串] */
   function stripParticles(t) {
@@ -921,7 +921,7 @@
 
     // ---------------------------------------------------------------- 关系打分
     var TIER_W = 4.5, STRONG = 4, ALPHA = 0.45, REL_W = 3;
-    var SN_CENTER = 0.5, SN_B_NEG = 2.4, SN_B_POS = 0.65, SN_MAX_NEG = 5.5, SN_MAX_POS = 1.0, SN_TOP = 260; // 整句网络: 非对称校准(低分重罚、高分克制)
+    var SN_CENTER = 0.25, SN_B_NEG = 2.2, SN_B_POS = 0.65, SN_MAX_NEG = 5.5, SN_MAX_POS = 1.0, SN_TOP = 260; // 整句网络: 非对称校准(低分重罚、高分克制)
     var L_EXACT = 0.55, L_K = [0.07, 0.12, 0.2], L_BASE = 0.06;            // 插值权重: 精确 / [粗类, 中类, 细类] / 词频
     var MIN_C = [8, 6, 4], MIN_N = [3, 3, 2], MIN_LIFT = [3, 3, 2];        // 语义类支持的门槛: 次数 / 不同词数 / 提升度
     // 这些状语后面的谓语不能再带 了/着/过 (不吃了饭 ✗  会买了房 ✗  很喜欢过 ✗); 例外: 没…过 / 别…着 等
@@ -1181,6 +1181,7 @@
       if (d && v.t === '是' && (OK_G[dt] || dt === '别' || dt === '不要')) return { tier: -1 };      // 没是 ✗
       if ((ms && c.des && NO_DE[ms.t]) || (mo && c.deo && NO_DE[mo.t])) return { tier: -1 };   // 什么的意思 ✗
       if (d && d.x === 6 && (c.di || asp === 'z')) return { tier: -1 };
+      if (d && (d.t === '在' || d.t === '正在') && v.adj && !o) return { tier: -1 }; // 在饿 / 正在好 ✗
       var pd = d && !d.x ? PRE_SET[d.t] : null;
       if (pd && (((pd.f & 1) && (asp === 'l' || asp === 'g')) || ((pd.f & 8) && s))) return { tier: -1 };      // 明天吃了 ✗  我总之… ✗
       if (ms && ms.x === 5) return { tier: -1 };       // 光杆量词只能跟在动词后面 (吃个饭)
@@ -1345,7 +1346,6 @@
       if (hit < 2) {
         if (lmChkN > 0 && lmMinChk < -7.5) z += 0.32 * (lmMinChk + 7.5);
         if (NGT && ngMin < -9.5) z += 0.28 * (ngMin + 9.5);
-        if (lmEst >= 0.99 && nl >= 2) z -= 0.8;
         // 组合状语 (感觉蛮 / 感觉没 等) 与谓语搭配偏弱时扣分, 避免虚高
         if (d && d.x === 1 && av && av[0] < -4.5) z += 0.4 * (av[0] + 4.5);
       }
@@ -1363,7 +1363,7 @@
         var th = RANK.th, noPen = rel >= rel0 * 0.999 && rel >= 0.48 && lmEst < 0.99;
         var ngTh = txt0.length >= 6 ? th[5] + 0.1 : th[5];
         var lmBad = th.length > 4 && ((lmChkN > 0 && lmMinChk < th[4]) || (lmN > 0 && lmMin < -12.5));
-        if (th.length > 5 && NGT && (ngMean < ngTh || (!hit && ngMin < -12.2))) lmBad = true;
+        if (th.length > 5 && NGT && ((ngMean < ngTh && (!lmChkN || lmMinChk < -1.5 || ngMean < ngTh - 0.6)) || (!hit && ngMin < -12.2))) lmBad = true;
         if (nl >= 2) {
           mf = 1 | (noPen ? 2 : 0) | (lmBad ? 4 : 0) | (v.t === '是' && !svo ? 8 : 0) | (hit ? 16 : 0);
           tier = modelTier(tier0, z, mf);
@@ -1398,12 +1398,15 @@
       var pstr = ps.join(''), last = c.co ? c.co[c.co.length - 1] : c.o || c.v, bad = 0, lw = 0, att = 0;
       if (ps[0] === '了' && c.asp === 'l' && !c.o) return { bad: 2 };          // 吃了了 ✗
       if (ps[0] === '了' && c.d && !c.d.x && PRE_SET[c.d.t] && (PRE_SET[c.d.t].f & 1)) return { bad: 2 }; // 明年考了 ✗
-      // 句末的"的": 前面是宾语时读起来像半截话 (分老婆的 ✗), 除非是 "是…的" (是老师的) / "会…的" (我会想你的)
-      if (ps[0] === '的' && c.o && !(c.v.t === '是' && (c.o.hum || c.o.pron)) && !(c.d && /会$/.test(c.d.t))) return { bad: 2 };
-      // "啊"的音变: 哇 只跟在 u / ao / ou 后面, 呐 只跟在 -n 后面
+      // 句末的"的": 没有"是/会/程度副词/形容词谓语"支撑时读起来像残缺定语从句 (快点翻身的 / 肯定发生的 ✗)
+      if (ps[0] === '的') {
+        var deOK = (c.v.t === '是' && (!c.o || c.o.hum || c.o.pron)) || (c.d && /(会|是|很|真|挺|蛮|太|最|超|非常|比较|特别|肯定|一定|本来|原来)$/.test(c.d.t) && !c.o) || (c.v.adj && !c.o) || (c.o && c.d && /会$/.test(c.d.t));
+        if (!deOK) return { bad: 2 };
+      }
+      // "啊"的音变: 哇 只跟在 u / ao / ou 后面, 呐 只跟在 -n 后面; 违背音变直接拦截
       var syl = strip(last.py[last.py.length - 1]), p0 = ps[ps.length - 1];
-      if (p0 === '哇' && !/(u|ao)$/.test(syl)) bad = 1;
-      if (p0 === '呐' && !/n$/.test(syl)) bad = 1;
+      if (p0 === '哇' && !/(u|ao)$/.test(syl)) return { bad: 2 };
+      if (p0 === '呐' && !/n$/.test(syl)) return { bad: 2 };
       // 有疑问词的句子不用"吗"
       if (pstr.indexOf('吗') >= 0 && ((c.s && QW[c.s.t]) || (c.o && QW[c.o.t]) || (c.d && QW[c.d.t]) || (c.mo && QW[c.mo.t]) || (c.ms && QW[c.ms.t]))) bad = 1;
       var idx = PP ? ppIdx[pstr] : undefined;
@@ -1891,6 +1894,9 @@
           if (e.k !== 'c' && dt0 && (PRE_SET[dt0] || (c.d.x === 1 && PRE_SET[dt0.slice(0, c.d.xa)]))) return; // 每次+以后再 ✗
           if ((e.f & 1) && (c.asp === 'l' || c.asp === 'g' || ps[0] === '了')) return;         // 明天…了 ✗
           if ((e.f & 2) && (ps.indexOf('吗') >= 0 || ps.indexOf('么') >= 0)) return;          // 也许…吗 ✗
+          // 残缺从句引导词 (而/无论/不管/虽然/如果/既然/只要/因为等) 单独带短句读着缺下半句, 直接跳过
+          if (e.k === 'c' && (e.t === '而' || (e.f & 4) || /^(无论|不管|虽然|尽管|即使|哪怕|既然|只要|只有|除非|不仅|不但|因为|由于|如果|要是|假如|万一)$/.test(e.t))) return;
+          if (/^(快点|赶紧|赶快|务必|千万)$/.test(e.t) && dt0 && /^(长期|一直|总是|老是|经常|通常|往往|没|没有|不|不会|不能)$/.test(dt0)) return; // 快点长期喝酒 ✗
           if ((e.f & 4) && ps.length && !(ps.length === 1 && ps[0] === '呢')) return;         // 如果…吧 ✗
           var ew = e.k === 'c' ? null : byText.get(e.t), pr = ew ? avMap.get(ew.i * M + c.v.i) : null, att = pr ? pr[2] : 0;
           // 句首时间词/关联词+核心句: 极严把关 T3 (避免"昨晚圆脸有福"评地道)
@@ -1909,6 +1915,7 @@
             if (!c.s) return;
             var subj = (c.ms ? c.ms.t + (c.des ? '的' : '') : '') + c.s.t;
             if (subj.length !== fill.n) return;
+            if (!c.s.pron && subj.length < 2) return; // 单字普通名词不加停顿语气词 (锅啊/哥啊 ✗)
             tp = fill.tp; text = subj + tp[0] + text.slice(subj.length); pen = 3.0;
           }
         }
@@ -1918,8 +1925,9 @@
           var cp = particleFit(c, ps);
           if (cp.bad > 1) return;
           pw += cp.lw;
-          if (cp.bad) pcap = 1;
+          if (cp.bad || (ps[ps.length - 1] === '诶' && cp.att < 12)) pcap = 1;
           else if (cp.att < 2 || RARE_P[ps[ps.length - 1]] || (sc.nl === 1 && !sc.hit)) pcap = 2;
+          if (RARE_P[ps[ps.length - 1]]) pen += 0.9;
           if (pcap === 3 && ps[0] === '的') pcap = 2;
           if (tier > pcap) tier = pcap;
         }
@@ -1967,7 +1975,7 @@
       });
       var seenNorm = new Set();
       list = list.filter(function (x) {                // 只差 他/她/它、哦/噢/喔、了/啦 的近似重复: 只留得分最高的那条
-        var k = x.text.replace(/[她它]/g, '他').replace(/您/g, '你').replace(/[噢喔]/g, '哦').replace(/[啦咯喽嘞]/g, '了').replace(/[呀哇]$/, '啊');
+        var k = x.text.replace(/[她它]/g, '他').replace(/您/g, '你').replace(/[噢喔]/g, '哦').replace(/[啦咯喽嘞]/g, '了').replace(/[呀哇]$/, '啊').replace(/恶梦/g, '噩梦');
         if (seenNorm.has(k)) return false; seenNorm.add(k); return true;
       });
       // 第九版: 排在前面的候选句请"整句网络"再看一遍 —— 它一次看完整句话, 能认出"两两都搭、合起来怪"的句子.
@@ -1984,22 +1992,25 @@
           var dsn = sn - SN_CENTER;
           var dz = dsn < 0 ? Math.max(-SN_MAX_NEG, SN_B_NEG * dsn) : Math.min(SN_MAX_POS, SN_B_POS * dsn);
           if (it.hit >= 2 && !hasWrap && dz < 0) dz *= 0.45;                     // 整句原样说过两次以上(无外加词): 网络嫌怪只信一半
-          var ngBadFull = false;
+          var ngBadFull = false, ngFixed = false;
           if (NGT && hasWrap) {
             var ngf = ngScore(it.text, 0);
-            if (it.ngM && ngf[0] < it.ngM - 0.15) dz += 1.2 * (ngf[0] - it.ngM);
-            var ngThF = it.text.length >= 6 ? RANK.th[5] + 0.1 : RANK.th[5];
+            var onlyPs = !it.pre && it.ps.length > 0;
+            if (it.ngM && ngf[0] < it.ngM - (onlyPs ? 0.35 : 0.15)) dz += (onlyPs ? 0.8 : 1.2) * (ngf[0] - it.ngM);
+            var ngThF = (it.text.length >= 6 ? RANK.th[5] + 0.1 : RANK.th[5]) - (onlyPs && it.pc >= 2 ? 0.45 : 0);
             if (ngf[0] < ngThF || (!it.hit && ngf[1] < -12.5)) ngBadFull = true;
+            if (onlyPs && it.ps[0] === '了' && ngf[0] >= (it.text.length >= 6 ? RANK.th[5] + 0.1 : RANK.th[5]) && ngf[0] > it.ngM + 0.2) ngFixed = true;
             it.dbg += ' ngF=' + ngf[0].toFixed(1) + '/' + ngf[1].toFixed(1);
           }
           var z2 = it.z + dz, nt = it.tier;
-          // 整句网络只做"把关与降级", 绝不把勉强/硬凑句硬抬进通顺
           if (it.mf & 1) {
-            var mf2 = it.mf | (ngBadFull ? 4 : 0);
+            var mf2 = (ngFixed ? (it.mf & ~4) : it.mf) | (ngBadFull ? 4 : 0);
             var mt = it.nl === 1 ? (ngBadFull || z2 < RANK.th[0] - 1.5 ? Math.min(nt, 1) : nt) : modelTier(it.t0, z2, mf2);
             if (mt < nt) nt = mt;
+            // 若原规则判为通顺(t0>=2)且无短板，经整句网络或句末"了"补全后达标，允许恢复至通顺 (仍绝不抬升 t0<=1 的怪句)
+            else if (mt >= 2 && nt === 1 && it.t0 >= 2 && !(mf2 & 4) && !it.pre && !it.tp && sn >= 0.45 && z2 >= RANK.th[0]) nt = Math.min(2, it.pc);
           }
-          if ((it.hit < 2 || hasWrap) && (sn < -0.15 || ngBadFull) && nt >= 2) nt = 1;
+          if ((it.hit < 2 || (hasWrap && !(it.hit >= 2 && !it.pre && it.pc >= 2))) && (sn < -0.25 || ngBadFull) && nt >= 2) nt = 1;
           if (it.pre && (it.pre[2] === 'D' || it.pre[2] === 'C') && nt === 3 && (sn < 0.6 || ngBadFull)) nt = 2;
           it.score += (nt - it.tier) * TIER_W + RANK_W * dz; it.tier = nt; it.z = z2;
           it.dbg += ' sn=' + sn.toFixed(2);
